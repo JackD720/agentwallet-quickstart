@@ -12,7 +12,7 @@ Quick start:
 Full docs: https://github.com/JackD720/agentwallet-quickstart
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from .core import (
     AgentWallet,
@@ -25,6 +25,7 @@ from .core import (
     EventType,
 )
 
+from .storage import SQLiteStorage
 from .dashboard import (
     register_wallet,
     unregister_wallet,
@@ -45,4 +46,6 @@ __all__ = [
     "register_wallet",
     "unregister_wallet",
     "start_dashboard_server",
+    # Storage
+    "SQLiteStorage",
 ]
