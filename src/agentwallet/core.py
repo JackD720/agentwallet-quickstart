@@ -247,9 +247,15 @@ class AgentWallet:
         max_daily_cents: Maximum daily spend in cents (default $50).
         audit_log: Optional shared AuditLog instance.
         governance: Optional shared GovernanceEngine instance.
+        persist: If True, wallet state survives process restarts (SQLite).
+        db_path: Path to SQLite file (default: "agentwallet.db").
 
     Usage:
+        # In-memory (default)
         wallet = AgentWallet("my-agent", budget_cents=5000)
+
+        # With persistence — state survives restarts
+        wallet = AgentWallet("my-agent", budget_cents=5000, persist=True)
 
         wallet.add_rule(SpendRule(
             rule_id="block-gpt4",
@@ -270,6 +276,8 @@ class AgentWallet:
         max_daily_cents: int = 5000,
         audit_log: Optional[AuditLog] = None,
         governance: Optional[GovernanceEngine] = None,
+        persist: bool = False,
+        db_path: Optional[str] = None,
     ):
         self.agent_id = agent_id
         self.budget_cents = budget_cents
@@ -284,8 +292,67 @@ class AgentWallet:
         self.kill_switch_active = False
         self.created_at = datetime.utcnow().isoformat() + "Z"
         self._callbacks: Dict[str, List[Callable]] = {}
+        self._storage = None
+
+        # Set up persistence
+        if persist:
+            from .storage import SQLiteStorage
+            self._storage = SQLiteStorage(db_path=db_path)
+            self._restore_from_db()
 
         self._add_default_rules()
+
+    def _restore_from_db(self) -> None:
+        """Restore wallet state from SQLite if it exists."""
+        if not self._storage:
+            return
+
+        saved = self._storage.load_wallet(self.agent_id)
+        if saved:
+            # Restore persisted state
+            self.budget_cents = saved["budget_cents"]
+            self.balance_cents = saved["balance_cents"]
+            self.max_per_tx_cents = saved["max_per_tx_cents"]
+            self.max_daily_cents = saved["max_daily_cents"]
+            self.kill_switch_active = saved["kill_switch_active"]
+            self.created_at = saved["created_at"]
+
+            # Restore transactions and audit entries into memory
+            self.transactions = self._storage.load_transactions(self.agent_id)
+            stored_entries = self._storage.load_audit_entries(agent_id=self.agent_id)
+            self.audit.entries = stored_entries
+        else:
+            # First time — save initial state
+            self._persist_wallet()
+
+    def _persist_wallet(self) -> None:
+        """Save current wallet state to SQLite."""
+        if not self._storage:
+            return
+        self._storage.save_wallet(
+            agent_id=self.agent_id,
+            budget_cents=self.budget_cents,
+            balance_cents=self.balance_cents,
+            max_per_tx_cents=self.max_per_tx_cents,
+            max_daily_cents=self.max_daily_cents,
+            kill_switch_active=self.kill_switch_active,
+            created_at=self.created_at,
+        )
+
+    def _persist_transaction(self, tx: Transaction) -> None:
+        """Save a transaction to SQLite."""
+        if not self._storage:
+            return
+        self._storage.save_transaction(tx)
+        # Also persist any new audit entries
+        self._persist_new_audit_entries()
+
+    def _persist_new_audit_entries(self) -> None:
+        """Persist any audit entries not yet in SQLite."""
+        if not self._storage:
+            return
+        for entry in self.audit.entries:
+            self._storage.save_audit_entry(entry)
 
     def _add_default_rules(self):
         """Built-in safety guardrails."""
@@ -435,6 +502,9 @@ class AgentWallet:
                 category=category,
                 verdict="allow",
             )
+            # Persist transaction + updated balance
+            self._persist_transaction(tx)
+            self._persist_wallet()
             result = {
                 "approved": True,
                 "tx_id": tx_id,
@@ -454,6 +524,8 @@ class AgentWallet:
                 verdict=verdict.value,
                 rule_id=triggered_rule,
             )
+            # Persist denied transaction
+            self._persist_transaction(tx)
             result = {
                 "approved": False,
                 "tx_id": tx_id,
@@ -473,6 +545,7 @@ class AgentWallet:
             amount_cents=amount_cents,
             details={"reason": reason},
         )
+        self._persist_wallet()
         return {"refunded_cents": amount_cents, "balance_cents": self.balance_cents}
 
     # ─────────────────────────────────────────────────────────────
@@ -487,12 +560,14 @@ class AgentWallet:
             EventType.KILL_SWITCH_ON,
             details={"reason": reason},
         )
+        self._persist_wallet()
         self._emit("kill_switch", {"agent_id": self.agent_id, "reason": reason, "active": True})
 
     def deactivate_kill_switch(self) -> None:
         """Resume agent spending."""
         self.kill_switch_active = False
         self.audit.create(self.agent_id, EventType.KILL_SWITCH_OFF)
+        self._persist_wallet()
         self._emit("kill_switch", {"agent_id": self.agent_id, "active": False})
 
     # ─────────────────────────────────────────────────────────────

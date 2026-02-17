@@ -25,12 +25,13 @@ from .core import (
     EventType,
 )
 
-from .storage import SQLiteStorage
 from .dashboard import (
     register_wallet,
     unregister_wallet,
     start_dashboard_server,
 )
+
+from .storage import SQLiteStorage
 
 __all__ = [
     # Core
@@ -42,10 +43,10 @@ __all__ = [
     "AuditEntry",
     "RuleVerdict",
     "EventType",
+    # Storage
+    "SQLiteStorage",
     # Dashboard
     "register_wallet",
     "unregister_wallet",
     "start_dashboard_server",
-    # Storage
-    "SQLiteStorage",
 ]
