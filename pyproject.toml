@@ -39,6 +39,8 @@ classifiers = [
 [project.optional-dependencies]
 dashboard = ["fastapi>=0.100.0", "uvicorn>=0.23.0"]
 langchain = ["langchain-core>=0.2.0"]
+cli = ["rich>=13.0.0"]
+dashboard-cli = ["rich>=13.0.0"]
 
 [project.urls]
 Homepage = "https://github.com/JackD720/agentwallet-quickstart"
